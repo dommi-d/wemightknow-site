@@ -31,6 +31,19 @@ nav{display:flex;gap:18px}
 #page a{color:#000;margin-right:18px}
 .sr a{position:absolute;left:-9999px}
 .sr a:focus{left:22px;top:60px;z-index:30;background:#fff;color:#000;padding:4px 8px}
+#radio{position:fixed;z-index:21;left:0;bottom:0;padding:34px 44px calc(env(safe-area-inset-bottom,0px) + 30px) 34px;display:flex;flex-direction:column;align-items:flex-start;gap:10px}
+#radio.away{pointer-events:none;padding:0}
+#radio.away #radioNow,#radio.away #radioList{display:none}
+#radio button{font:inherit;background:none;border:0;border-bottom:1px solid transparent;padding:2px 0;cursor:pointer;color:#000;text-align:left}
+#radio button:focus-visible{outline:1px solid #000;outline-offset:3px}
+#radioNow{border-bottom-color:#000!important}
+#radioList{display:none;flex-direction:column;gap:6px}
+#radioList.open{display:flex}
+#radioList button.on::before{content:"\25CF  "}
+#radioBox{max-width:calc(100vw - 80px)}
+#radioBox.off{position:absolute;left:-9999px;top:0}
+#radioBox{max-width:calc(100vw - 80px)}
+#radioBox.off{position:absolute;left:-9999px;top:0}
 </style></head><body>
 <header><a href="#" id="logo">Placeholder Studio</a>
 <nav aria-label="Main"><a href="#work">Work</a><a href="#about">About</a><a href="#contact">Contact</a></nav></header>
@@ -40,6 +53,7 @@ nav{display:flex;gap:18px}
 <div id="zoom"><button id="bFit">Constellation</button><button id="bClose">Close-up</button></div>
 <div class="view" id="grid"><div id="gridIn"></div></div>
 <div class="view" id="page"><div class="in" id="pageIn"></div></div>
+<div id="radio"><div id="radioBox" class="off"></div><div id="radioList" role="group" aria-label="Choose a radio"></div><button id="radioNow" aria-expanded="false" aria-controls="radioList"></button></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
 <script>
@@ -58,6 +72,14 @@ const ADJ=["Ember","Tidal","Paper","Mono","Velvet","Solar","Atlas","Halo"],NOUN=
 const ASP=[1.5,.75,1,1.78,.67,1.33,2.1,.8];
 const MEDIA=Array.from({length:32},(_,n)=>({src:"gen",type:n%8===3?"video":"image",n,aspect:ASP[n%8],
   title:ADJ[n%8]+" "+NOUN[(n+(n>>3))%8],slug:"p"+String(n+1).padStart(2,"0")+"-"+ADJ[n%8].toLowerCase()}));
+/* ================================================================== */
+/* ============ RADIOS: three Spotify playlists (replace the IDs) ============
+   playlist = the ID from open.spotify.com/playlist/<ID>. One is picked at random per visit. */
+const RADIOS=[
+  {name:"Radio 01",playlist:"4gz2e7jQCCdVIWwBmVOSec"},
+  {name:"Radio 02",playlist:"0UgUnXQRmEboERYQS0TIVj"},
+  {name:"Radio 03",playlist:"57Dt0rPhIQ1yvqmhf1bg3G"}
+];
 /* ================================================================== */
 const $=s=>document.querySelector(s),pick=a=>a[Math.floor(Math.random()*a.length)];
 const reduced=matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -105,7 +127,7 @@ function initScene(){
   const split=(r,d,out)=>{const{w,h}=r;if(d>5||w*h<minA*(.7+R()*.9)||(w*h<minA*2.2&&R()<.35)){out.push(r);return}
     const t=.32+R()*.36;if(w/h>.9+R()*.4){split({u:r.u,v:r.v,w:w*t,h},d+1,out);split({u:r.u+w*t,v:r.v,w:w*(1-t),h},d+1,out)}
     else{split({u:r.u,v:r.v,w,h:h*t},d+1,out);split({u:r.u,v:r.v+h*t,w,h:h*(1-t)},d+1,out)}};
-  ["front","left","right","floor"].forEach(wall=>{const out=[];split({u:0,v:0,w:10,h:10},0,out);
+  ["front","left","right"/* ,"floor" to put panels on the floor again */].forEach(wall=>{const out=[];split({u:0,v:0,w:10,h:10},0,out);
     out.forEach(slot=>{const mat=new THREE.ShaderMaterial({uniforms:{map:{value:null},uvS:{value:new THREE.Vector2(1,1)},uvO:{value:new THREE.Vector2()},op:{value:1},br:{value:1}},vertexShader:VS,fragmentShader:FS});
       const mesh=new THREE.Mesh(geo,mat),p={wall,slot,cur:{...slot},mesh,lift:0,hv:0,busy:false};mesh.userData.p=p;panels.push(p);setMedia(p,nextMedia());layout(p);scene.add(mesh)})});
 }
@@ -122,7 +144,7 @@ function step(){if(!document.hidden&&route==="home")(Math.random()<.6?fadeSwap:s
 let mx=0,my=0,cx=0,cy=0,tilt=null,hovered=null;const ray=new THREE.Raycaster(),ndc=new THREE.Vector2(),tag=$("#tag"),D=Math.PI/180;
 function hit(x,y){ndc.set(x/innerWidth*2-1,-(y/innerHeight)*2+1);ray.setFromCamera(ndc,camera);const h=ray.intersectObjects(panels.map(p=>p.mesh))[0];return h?h.object.userData.p:null}
 addEventListener("pointermove",e=>{if(e.pointerType!=="mouse"||route!=="home"||!gl)return;mx=e.clientX/innerWidth*2-1;my=e.clientY/innerHeight*2-1;
-  hovered=hit(e.clientX,e.clientY);$("#gl").style.cursor=hovered?"pointer":"default";
+  hovered=e.target.id==="gl"?hit(e.clientX,e.clientY):null;$("#gl").style.cursor=hovered?"pointer":"default";
   if(hovered){const v=hovered.mesh.localToWorld(new THREE.Vector3(-.5,-.5,0)).project(camera);
     tag.textContent=hovered.media.title;tag.style.left=Math.min(Math.max((v.x+1)/2*innerWidth+6,8),innerWidth-140)+"px";tag.style.top=Math.min(Math.max((1-v.y)/2*innerHeight-24,50),innerHeight-30)+"px";tag.style.opacity=1}else tag.style.opacity=0});
 $("#gl").addEventListener("click",e=>{const p=hit(e.clientX,e.clientY);if(p)location.hash=p.media.slug});
@@ -164,7 +186,8 @@ function route_(){const h=location.hash.slice(1);["work","grid","page"].forEach(
   else if(h==="contact"){route="page";pg(`<h1>Contact</h1><p>hello@example.com<br>Placeholder address, City</p>`)}
   else if(m>=0){route="page";const a=MEDIA[m],b=MEDIA[(m+1)%MEDIA.length],c=MEDIA[(m+2)%MEDIA.length],n=MEDIA[(m+1)%MEDIA.length];
     pg(`<h1>${a.title}</h1>${big(a)}<p>One short placeholder paragraph describing this project: the brief, the approach, and the outcome, in a few plain sentences.</p>${big(b)}${big(c)}<p><a href="#work">← Work</a><a href="#${n.slug}">Next: ${n.title} →</a></p>`)}
-  else{location.hash="";return}}
+  else{location.hash="";return}
+  $("#radio").classList.toggle("away",route!=="home");if(route!=="home")openList(false)}
 addEventListener("hashchange",route_);
 addEventListener("resize",()=>{if(gl){camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)}measure()});
 
@@ -180,6 +203,26 @@ function frame(t){requestAnimationFrame(frame);t*=.001;
     if(Math.abs(p.hv-want)>.001){p.hv+=(want-p.hv)*.12;u.br.value=1+p.hv*.06;layout(p)}
     if(!reduced&&p.media.type==="video"&&p.ent.canvas){draw(p.ent.canvas,p.media,t);p.ent.tex.needsUpdate=true}});
   renderer.render(scene,camera)}
+/* ---------- Radio: audio stays in the page (Spotify embed), never links out ---------- */
+let radio=pick(RADIOS),radioCtl=null,listOpen=false;
+const rBox=$("#radioBox"),rList=$("#radioList"),rNow=$("#radioNow"),uri=r=>"spotify:playlist:"+r.playlist;
+function label(){rNow.textContent="\u266a "+radio.name;rList.querySelectorAll("button").forEach(b=>b.classList.toggle("on",b.dataset.id===radio.playlist))}
+RADIOS.forEach(r=>{const b=document.createElement("button");b.textContent=r.name;b.dataset.id=r.playlist;rList.appendChild(b)});
+
+function makeRadio(){const host=document.createElement("div");rBox.appendChild(host);
+  /* hidden Spotify player: nothing from it is ever shown on screen */
+  
+  window.onSpotifyIframeApiReady=api=>api.createController(host,{uri:uri(radio),width:300,height:80},c=>{radioCtl=c;c.addListener("ready",()=>c.play())});
+  const s=document.createElement("script");s.src="https://open.spotify.com/embed/iframe-api/v1";s.async=true;document.head.appendChild(s)}
+function openList(o){listOpen=o;rList.classList.toggle("open",o);rNow.setAttribute("aria-expanded",o)}
+rNow.onclick=()=>openList(!listOpen);
+rList.addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;const r=RADIOS.find(x=>x.playlist===b.dataset.id);openList(false);if(r===radio)return;radio=r;label();
+  if(radioCtl){radioCtl.loadUri(uri(r));radioCtl.play()}});
+/* browsers block sound until the visitor interacts: the first click, tap or key press anywhere starts the radio */
+const startRadio=()=>{if(radioCtl)radioCtl.play()};
+["pointerdown","keydown"].forEach(t=>addEventListener(t,startRadio,{once:true}));
+addEventListener("pointerdown",e=>{if(listOpen&&!e.target.closest("#radio"))openList(false)});
+label();makeRadio();
 buildLists();measure();
 if(gl){initScene();if(!reduced)gsap.delayedCall(2,step)}
 route_();requestAnimationFrame(frame);
