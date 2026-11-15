@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Spatial Cube – v1 preview</title>
+<style>
+:root{color-scheme:light;--bg:#fff;--fg:#000}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:13px/1.45 system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;overflow:hidden}
+#gl{position:fixed;inset:0;width:100%;height:100%;display:block}
+header{position:fixed;inset:0 0 auto 0;z-index:20;display:flex;justify-content:space-between;padding:calc(env(safe-area-inset-top,0px) + 18px) 22px 0;mix-blend-mode:difference;color:#fff;pointer-events:none}
+header a{color:#fff;text-decoration:none;pointer-events:auto;letter-spacing:.04em}
+header a:focus-visible{outline:1px solid #fff;outline-offset:3px}
+nav{display:flex;gap:18px}
+#tag{position:fixed;z-index:10;pointer-events:none;font-size:11px;background:#fff;color:#000;padding:2px 6px;opacity:0;transition:opacity .2s;white-space:nowrap}
+.view{position:fixed;inset:0;z-index:5;background:#fff;display:none}
+#work{overflow:hidden;touch-action:none;cursor:grab}
+#field{position:absolute;left:0;top:0;transform-origin:0 0;will-change:transform}
+#field a{position:absolute;display:block}
+#field img{width:100%;height:100%;display:block;object-fit:cover;-webkit-user-drag:none;user-select:none}
+#zoom{position:fixed;z-index:21;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom,0px) + 18px);display:none;gap:16px}
+#zoom button{font:inherit;background:none;border:0;border-bottom:1px solid #000;padding:2px 0;cursor:pointer;color:#000}
+#grid,#page{overflow:auto;padding:calc(env(safe-area-inset-top,0px) + 70px) 22px 40px}
+#grid div{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px}
+#grid a{display:block;aspect-ratio:4/5;overflow:hidden;position:relative}
+#grid img{width:100%;height:100%;object-fit:cover;display:block}
+#grid span{position:absolute;left:6px;bottom:6px;background:#fff;padding:1px 5px;font-size:11px;color:#000}
+#page .in{max-width:960px;margin:0 auto}
+#page h1{font-weight:500;font-size:clamp(26px,5vw,44px);margin:0 0 20px;letter-spacing:-.01em}
+#page img,#page video{width:100%;height:auto;display:block;margin:0 0 14px}
+#page p{max-width:560px;font-size:15px}
+#page a{color:#000;margin-right:18px}
+.sr a{position:absolute;left:-9999px}
+.sr a:focus{left:22px;top:60px;z-index:30;background:#fff;color:#000;padding:4px 8px}
+#radio{position:fixed;z-index:21;left:0;bottom:0;padding:34px 44px calc(env(safe-area-inset-bottom,0px) + 30px) 34px;display:flex;flex-direction:column;align-items:flex-start;gap:10px}
+#radio.away{pointer-events:none;padding:0}
+#radio.away #radioNow,#radio.away #radioList{display:none}
+#radio button{font:inherit;background:none;border:0;border-bottom:1px solid transparent;padding:2px 0;cursor:pointer;color:#000;text-align:left}
+#radio button:focus-visible{outline:1px solid #000;outline-offset:3px}
+#radioNow{border-bottom-color:#000!important}
+#radioList{display:none;flex-direction:column;gap:6px}
+#radioList.open{display:flex}
+#radioList button.on::before{content:"\25CF  "}
+#radioBox{max-width:calc(100vw - 80px)}
+#radioBox.off{position:absolute;left:-9999px;top:0}
+#radioBox{max-width:calc(100vw - 80px)}
+#radioBox.off{position:absolute;left:-9999px;top:0}
+</style></head><body>
+<header><a href="#" id="logo">Placeholder Studio</a>
+<nav aria-label="Main"><a href="#work">Work</a><a href="#about">About</a><a href="#contact">Contact</a></nav></header>
+<canvas id="gl"></canvas><div id="tag"></div>
+<nav class="sr" id="sr" aria-label="Projects"></nav>
+<div class="view" id="work"><div id="field"></div></div>
+<div id="zoom"><button id="bFit">Constellation</button><button id="bClose">Close-up</button></div>
+<div class="view" id="grid"><div id="gridIn"></div></div>
+<div class="view" id="page"><div class="in" id="pageIn"></div></div>
+<div id="radio"><div id="radioBox" class="off"></div><div id="radioList" role="group" aria-label="Choose a radio"></div><button id="radioNow" aria-expanded="false" aria-controls="radioList"></button></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script>
+/* ============ TUNABLES: reorganisation timing & easing ============ */
+const CONFIG={
+  CHANGE_MIN:1.5, CHANGE_MAX:3,      // seconds between visible changes
+  FADE:0.9, SLIDE:1.8,               // seconds
+  EASE_FADE:"power2.inOut", EASE_SLIDE:"power3.inOut",
+  LOOK_DEG:4, SWAY_DEG:1.2, DAMPING:0.04, FOV:68, MAX_DPR:2,
+  CAM_Z:4.2                          // camera depth: 3 = close, 4.6 = near the back edge (more room visible)
+};
+/* ============ MEDIA DATA: swap this block for your real work ============
+   Each item: { src, type:"image"|"video", title, slug }.
+   src:"gen" makes a placeholder (video placeholders are animated). */
+const ADJ=["Ember","Tidal","Paper","Mono","Velvet","Solar","Atlas","Halo"],NOUN=["Studio","House","Field","Series","Room","Study","Archive","Edition"];
+const ASP=[1.5,.75,1,1.78,.67,1.33,2.1,.8];
+const MEDIA=Array.from({length:32},(_,n)=>({src:"gen",type:n%8===3?"video":"image",n,aspect:ASP[n%8],
+  title:ADJ[n%8]+" "+NOUN[(n+(n>>3))%8],slug:"p"+String(n+1).padStart(2,"0")+"-"+ADJ[n%8].toLowerCase()}));
+/* ================================================================== */
+/* ============ RADIOS: three Spotify playlists (replace the IDs) ============
+   playlist = the ID from open.spotify.com/playlist/<ID>. One is picked at random per visit. */
+const RADIOS=[
+  {name:"Radio 01",playlist:"4gz2e7jQCCdVIWwBmVOSec"},
+  {name:"Radio 02",playlist:"0UgUnXQRmEboERYQS0TIVj"},
+  {name:"Radio 03",playlist:"57Dt0rPhIQ1yvqmhf1bg3G"}
+];
+/* ================================================================== */
+const $=s=>document.querySelector(s),pick=a=>a[Math.floor(Math.random()*a.length)];
+const reduced=matchMedia("(prefers-reduced-motion: reduce)").matches;
+const touch=matchMedia("(pointer:coarse)").matches,mobile=innerWidth<700;
+const rng=a=>()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296};
+const shuffle=a=>{for(let i=a.length-1;i>0;i--){const j=Math.random()*(i+1)|0;[a[i],a[j]]=[a[j],a[i]]}return a};
+function draw(c,m,t){const x=c.getContext("2d"),W=c.width,H=c.height,r=rng(m.n*977+1),h=(m.n*47)%360,v=m.type==="video";
+  const g=x.createLinearGradient(0,0,W,H);g.addColorStop(0,`hsl(${h},70%,${55+r()*20}%)`);g.addColorStop(1,`hsl(${(h+50+r()*80)%360},75%,${35+r()*25}%)`);
+  x.fillStyle=g;x.fillRect(0,0,W,H);
+  for(let i=0;i<5;i++){x.fillStyle=`hsla(${(h+r()*200)%360},80%,${50+r()*40}%,.55)`;
+    const px=r()*W+(v?Math.cos(t+i)*W*.05:0),py=r()*H,s=(.1+r()*.35)*Math.min(W,H);
+    if(i%2){x.beginPath();x.arc(px,py,s,0,7);x.fill()}else x.fillRect(px-s,py-s/2,s*2,s)}
+  x.fillStyle="rgba(255,255,255,.92)";x.font=`${W*.07}px system-ui`;x.fillText(String(m.n+1).padStart(2,"0")+(v?" ▶":""),W*.05,H*.93)}
+function canvasFor(m,w,t=0){const c=document.createElement("canvas");c.width=w;c.height=Math.round(w/m.aspect);draw(c,m,t);return c}
+
+/* ---------- WebGL cube ---------- */
+let gl=true,renderer,scene,camera;
+try{renderer=new THREE.WebGLRenderer({canvas:$("#gl"),antialias:true});if(!renderer.getContext())gl=false}catch(e){gl=false}
+const panels=[],texCache=new Map();let route="home";
+const VS="varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}";
+const FS="uniform sampler2D map;uniform vec2 uvS,uvO;uniform float op,br;varying vec2 vUv;void main(){vec3 c=texture2D(map,vUv*uvS+uvO).rgb*br;gl_FragColor=vec4(mix(vec3(1.),c,op),1.);}";
+function getTex(m){let e=texCache.get(m.slug);if(e)return e;e={aspect:m.aspect||1.5};
+  if(m.src==="gen"){e.canvas=canvasFor(m,mobile?256:512);e.tex=new THREE.CanvasTexture(e.canvas)}
+  else if(m.type==="video"){const v=Object.assign(document.createElement("video"),{src:m.src,muted:true,loop:true,playsInline:true,crossOrigin:"anonymous"});v.play().catch(()=>{});e.tex=new THREE.VideoTexture(v);v.onloadedmetadata=()=>e.aspect=v.videoWidth/v.videoHeight}
+  else e.tex=new THREE.TextureLoader().load(m.src,t=>e.aspect=t.image.width/t.image.height);
+  e.tex.minFilter=THREE.LinearFilter;texCache.set(m.slug,e);return e}
+let deck=[];
+function nextMedia(){const shown=new Set(panels.map(p=>p.media&&p.media.slug));if(!deck.length)deck=shuffle(MEDIA.slice());
+  let i=deck.findIndex(m=>!shown.has(m.slug));if(i<0)i=0;return deck.splice(i,1)[0]}
+function crop(p){const s=p.cur,sa=s.w/s.h,ia=p.ent.aspect,U=p.mesh.material.uniforms;let sx=1,sy=1;
+  if(ia>sa)sx=sa/ia;else sy=ia/sa;sx/=p.zoom;sy/=p.zoom;U.uvS.value.set(sx,sy);U.uvO.value.set((1-sx)*p.fx,(1-sy)*p.fy)}
+function layout(p){const s=p.cur,l=p.lift*.25+.01+p.hv*.03,k=1+p.hv*.012,cu=s.u+s.w/2,cv=s.v+s.h/2,m=p.mesh;
+  if(p.wall==="front"){m.position.set(cu-5,cv-5,-5+l);m.rotation.set(0,0,0)}
+  else if(p.wall==="left"){m.position.set(-5+l,cv-5,5-cu);m.rotation.set(0,Math.PI/2,0)}
+  else if(p.wall==="right"){m.position.set(5-l,cv-5,-5+cu);m.rotation.set(0,-Math.PI/2,0)}
+  else{m.position.set(cu-5,-5+l,5-cv);m.rotation.set(-Math.PI/2,0,0)}
+  m.scale.set((s.w-.05)*k,(s.h-.05)*k,1);crop(p)}
+function setMedia(p,m){p.media=m;p.ent=getTex(m);p.mesh.material.uniforms.map.value=p.ent.tex;
+  p.zoom=1+Math.random()*.35;p.fx=.25+Math.random()*.5;p.fy=.25+Math.random()*.5;crop(p)}
+function initScene(){
+  scene=new THREE.Scene();scene.background=new THREE.Color(0xffffff);
+  camera=new THREE.PerspectiveCamera(CONFIG.FOV,innerWidth/innerHeight,.1,50);camera.position.set(0,0,CONFIG.CAM_Z);camera.rotation.order="YXZ";
+  renderer.setPixelRatio(Math.min(devicePixelRatio,mobile?1.5:CONFIG.MAX_DPR));renderer.setSize(innerWidth,innerHeight);
+  const R=rng(7),minA=mobile?15:6, /* smaller = more, smaller panels */geo=new THREE.PlaneGeometry(1,1);
+  const split=(r,d,out)=>{const{w,h}=r;if(d>5||w*h<minA*(.7+R()*.9)||(w*h<minA*2.2&&R()<.35)){out.push(r);return}
+    const t=.32+R()*.36;if(w/h>.9+R()*.4){split({u:r.u,v:r.v,w:w*t,h},d+1,out);split({u:r.u+w*t,v:r.v,w:w*(1-t),h},d+1,out)}
+    else{split({u:r.u,v:r.v,w,h:h*t},d+1,out);split({u:r.u,v:r.v+h*t,w,h:h*(1-t)},d+1,out)}};
+  ["front","left","right"/* ,"floor" to put panels on the floor again */].forEach(wall=>{const out=[];split({u:0,v:0,w:10,h:10},0,out);
+    out.forEach(slot=>{const mat=new THREE.ShaderMaterial({uniforms:{map:{value:null},uvS:{value:new THREE.Vector2(1,1)},uvO:{value:new THREE.Vector2()},op:{value:1},br:{value:1}},vertexShader:VS,fragmentShader:FS});
+      const mesh=new THREE.Mesh(geo,mat),p={wall,slot,cur:{...slot},mesh,lift:0,hv:0,busy:false};mesh.userData.p=p;panels.push(p);setMedia(p,nextMedia());layout(p);scene.add(mesh)})});
+}
+function fadeSwap(){const p=pick(panels.filter(p=>!p.busy));if(!p)return;p.busy=true;const U=p.mesh.material.uniforms.op;
+  gsap.timeline({onComplete:()=>p.busy=false}).to(U,{value:0,duration:CONFIG.FADE,ease:CONFIG.EASE_FADE}).call(()=>setMedia(p,nextMedia())).to(U,{value:1,duration:CONFIG.FADE,ease:CONFIG.EASE_FADE})}
+function swapSlots(){const a=pick(panels.filter(p=>!p.busy));if(!a)return;
+  const b=pick(panels.filter(q=>q!==a&&!q.busy&&q.wall===a.wall&&Math.abs(q.slot.w*q.slot.h-a.slot.w*a.slot.h)>1));if(!b)return fadeSwap();
+  a.busy=b.busy=true;[a.slot,b.slot]=[b.slot,a.slot];
+  [a,b].forEach(p=>{const t=p.slot;gsap.to(p.cur,{u:t.u,v:t.v,w:t.w,h:t.h,duration:CONFIG.SLIDE,ease:CONFIG.EASE_SLIDE,
+    onUpdate(){p.lift=Math.sin(this.progress()*Math.PI);layout(p)},onComplete(){p.lift=0;p.busy=false;layout(p)}})})}
+function step(){if(!document.hidden&&route==="home")(Math.random()<.6?fadeSwap:swapSlots)();gsap.delayedCall(gsap.utils.random(CONFIG.CHANGE_MIN,CONFIG.CHANGE_MAX),step)}
+
+/* ---------- look-around, hover, click ---------- */
+let mx=0,my=0,cx=0,cy=0,tilt=null,hovered=null;const ray=new THREE.Raycaster(),ndc=new THREE.Vector2(),tag=$("#tag"),D=Math.PI/180;
+function hit(x,y){ndc.set(x/innerWidth*2-1,-(y/innerHeight)*2+1);ray.setFromCamera(ndc,camera);const h=ray.intersectObjects(panels.map(p=>p.mesh))[0];return h?h.object.userData.p:null}
+addEventListener("pointermove",e=>{if(e.pointerType!=="mouse"||route!=="home"||!gl)return;mx=e.clientX/innerWidth*2-1;my=e.clientY/innerHeight*2-1;
+  hovered=e.target.id==="gl"?hit(e.clientX,e.clientY):null;$("#gl").style.cursor=hovered?"pointer":"default";
+  if(hovered){const v=hovered.mesh.localToWorld(new THREE.Vector3(-.5,-.5,0)).project(camera);
+    tag.textContent=hovered.media.title;tag.style.left=Math.min(Math.max((v.x+1)/2*innerWidth+6,8),innerWidth-140)+"px";tag.style.top=Math.min(Math.max((1-v.y)/2*innerHeight-24,50),innerHeight-30)+"px";tag.style.opacity=1}else tag.style.opacity=0});
+$("#gl").addEventListener("click",e=>{const p=hit(e.clientX,e.clientY);if(p)location.hash=p.media.slug});
+addEventListener("pointerdown",e=>{if(e.pointerType==="touch"&&window.DeviceOrientationEvent&&DeviceOrientationEvent.requestPermission&&!addEventListener._t){addEventListener._t=1;DeviceOrientationEvent.requestPermission().catch(()=>{})}},{once:false});
+addEventListener("deviceorientation",e=>{if(e.gamma==null)return;const c=v=>Math.max(-1,Math.min(1,v));tilt={x:c(e.gamma/30)*CONFIG.LOOK_DEG,y:c(((e.beta||45)-45)/30)*CONFIG.LOOK_DEG}});
+
+/* ---------- Work: constellation <-> close-up ---------- */
+const thumbs={},items=[],W=2400,H=1600;let fit=1,maxS=12;const T={s:1,tx:0,ty:0},C={s:1,tx:0,ty:0};
+const thumb=m=>thumbs[m.slug]||(thumbs[m.slug]=m.src==="gen"?canvasFor(m,360).toDataURL("image/jpeg",.8):m.src);
+function buildLists(){const g=$("#gridIn"),sr=$("#sr");MEDIA.forEach(m=>{
+  g.insertAdjacentHTML("beforeend",`<a href="#${m.slug}"><img loading="lazy" alt="${m.title}" src="${thumb(m)}"><span>${m.title}</span></a>`);
+  sr.insertAdjacentHTML("beforeend",`<a href="#${m.slug}">${m.title}</a>`)})}
+function buildField(){if(items.length)return;const R=rng(21),f=$("#field"),cells=shuffle(Array.from({length:32},(_,i)=>i));
+  f.style.width=W+"px";f.style.height=H+"px";
+  MEDIA.forEach((m,i)=>{const c=cells[i],w=(110+R()*110)*(m.aspect<1?.8:1),h=w/m.aspect,x=(c%8)*300+R()*Math.max(0,300-w),y=((c/8)|0)*400+R()*Math.max(0,400-h);
+    const a=document.createElement("a");a.href="#"+m.slug;a.style.cssText=`left:${x}px;top:${y}px;width:${w}px;height:${h}px`;a.innerHTML=`<img alt="${m.title}" src="${thumb(m)}" draggable="false">`;
+    f.appendChild(a);items.push({x,y,w,h})})}
+function measure(){fit=Math.min(innerWidth/W,innerHeight/H)*.95;maxS=innerWidth/110*1.5}
+function toFit(){T.s=fit;T.tx=(innerWidth-W*fit)/2;T.ty=(innerHeight-H*fit)/2}
+function toItem(i){const it=items[i],s=Math.max(innerWidth/it.w,innerHeight/it.h)*1.1;T.s=Math.min(s,maxS*1.2);T.tx=innerWidth/2-(it.x+it.w/2)*T.s;T.ty=innerHeight/2-(it.y+it.h/2)*T.s}
+function zoomAt(px,py,s){const ns=Math.min(maxS,Math.max(fit,s));T.tx=px-(px-T.tx)*ns/T.s;T.ty=py-(py-T.ty)*ns/T.s;T.s=ns;if(ns<=fit*1.02)toFit()}
+const wk=$("#work");let drag=null;
+wk.addEventListener("wheel",e=>{e.preventDefault();zoomAt(e.clientX,e.clientY,T.s*Math.exp(-e.deltaY*.0012))},{passive:false});
+wk.addEventListener("pointerdown",e=>{drag={x:e.clientX,y:e.clientY,tx:T.tx,ty:T.ty,moved:false}});
+addEventListener("pointermove",e=>{if(!drag)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;if(Math.hypot(dx,dy)>5)drag.moved=true;if(drag.moved){T.tx=drag.tx+dx;T.ty=drag.ty+dy}});
+addEventListener("pointerup",()=>setTimeout(()=>drag=null,0));
+wk.addEventListener("click",e=>{if(drag&&drag.moved)e.preventDefault()},true);
+$("#bFit").onclick=toFit;$("#bClose").onclick=()=>toItem(Math.random()*items.length|0);
+
+/* ---------- pages & router ---------- */
+const big=m=>m.src==="gen"?`<img loading="lazy" alt="${m.title}" src="${canvasFor(m,1200).toDataURL("image/jpeg",.85)}">`:m.type==="video"?`<video src="${m.src}" muted loop autoplay playsinline controls></video>`:`<img loading="lazy" alt="${m.title}" src="${m.src}">`;
+function route_(){const h=location.hash.slice(1);["work","grid","page"].forEach(i=>$("#"+i).style.display="none");$("#zoom").style.display="none";tag.style.opacity=0;
+  const pg=html=>{$("#pageIn").innerHTML=html;$("#page").style.display="block";$("#page").scrollTop=0};
+  const m=MEDIA.findIndex(x=>x.slug===h);
+  if(!h){route="home";if(!gl)$("#grid").style.display="block"}
+  else if(h==="work"){if(!gl||reduced){route="grid";$("#grid").style.display="block"}else{route="work";buildField();measure();wk.style.display="block";$("#zoom").style.display="flex";
+      const i=Math.random()*items.length|0;toItem(i);Object.assign(C,T);toFit()}}
+  else if(h==="about"){route="page";pg(`<h1>About</h1><p>Placeholder studio text. Replace with a short, plain paragraph about your practice.</p>`)}
+  else if(h==="contact"){route="page";pg(`<h1>Contact</h1><p>hello@example.com<br>Placeholder address, City</p>`)}
+  else if(m>=0){route="page";const a=MEDIA[m],b=MEDIA[(m+1)%MEDIA.length],c=MEDIA[(m+2)%MEDIA.length],n=MEDIA[(m+1)%MEDIA.length];
+    pg(`<h1>${a.title}</h1>${big(a)}<p>One short placeholder paragraph describing this project: the brief, the approach, and the outcome, in a few plain sentences.</p>${big(b)}${big(c)}<p><a href="#work">← Work</a><a href="#${n.slug}">Next: ${n.title} →</a></p>`)}
+  else{location.hash="";return}
+  $("#radio").classList.toggle("away",route!=="home");if(route!=="home")openList(false)}
+addEventListener("hashchange",route_);
+addEventListener("resize",()=>{if(gl){camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)}measure()});
+
+/* ---------- main loop ---------- */
+function frame(t){requestAnimationFrame(frame);t*=.001;
+  if(route==="work"){C.s+=(T.s-C.s)*.12;C.tx+=(T.tx-C.tx)*.12;C.ty+=(T.ty-C.ty)*.12;$("#field").style.transform=`translate3d(${C.tx}px,${C.ty}px,0) scale(${C.s})`;return}
+  if(route!=="home"||!gl)return;
+  let tx=0,ty=0;if(!reduced){tx=mx*CONFIG.LOOK_DEG;ty=my*CONFIG.LOOK_DEG;
+    if(tilt){tx=tilt.x;ty=tilt.y}else if(touch){tx=Math.sin(t*.12)*CONFIG.LOOK_DEG*.8;ty=Math.cos(t*.09)*CONFIG.LOOK_DEG*.5}
+    tx+=Math.sin(t*.23)*CONFIG.SWAY_DEG;ty+=Math.cos(t*.17)*CONFIG.SWAY_DEG*.7}
+  cx+=(tx-cx)*CONFIG.DAMPING;cy+=(ty-cy)*CONFIG.DAMPING;camera.rotation.set(-cy*D,-cx*D,0);
+  panels.forEach(p=>{const u=p.mesh.material.uniforms,want=p===hovered?1:0;
+    if(Math.abs(p.hv-want)>.001){p.hv+=(want-p.hv)*.12;u.br.value=1+p.hv*.06;layout(p)}
+    if(!reduced&&p.media.type==="video"&&p.ent.canvas){draw(p.ent.canvas,p.media,t);p.ent.tex.needsUpdate=true}});
+  renderer.render(scene,camera)}
+/* ---------- Radio: audio stays in the page (Spotify embed), never links out ---------- */
+let radio=pick(RADIOS),radioCtl=null,listOpen=false;
+const rBox=$("#radioBox"),rList=$("#radioList"),rNow=$("#radioNow"),uri=r=>"spotify:playlist:"+r.playlist;
+function label(){rNow.textContent="\u266a "+radio.name;rList.querySelectorAll("button").forEach(b=>b.classList.toggle("on",b.dataset.id===radio.playlist))}
+RADIOS.forEach(r=>{const b=document.createElement("button");b.textContent=r.name;b.dataset.id=r.playlist;rList.appendChild(b)});
+
+function makeRadio(){const host=document.createElement("div");rBox.appendChild(host);
+  /* hidden Spotify player: nothing from it is ever shown on screen */
+  
+  window.onSpotifyIframeApiReady=api=>api.createController(host,{uri:uri(radio),width:300,height:80},c=>{radioCtl=c;c.addListener("ready",()=>c.play())});
+  const s=document.createElement("script");s.src="https://open.spotify.com/embed/iframe-api/v1";s.async=true;document.head.appendChild(s)}
+function openList(o){listOpen=o;rList.classList.toggle("open",o);rNow.setAttribute("aria-expanded",o)}
+rNow.onclick=()=>openList(!listOpen);
+rList.addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;const r=RADIOS.find(x=>x.playlist===b.dataset.id);openList(false);if(r===radio)return;radio=r;label();
+  if(radioCtl){radioCtl.loadUri(uri(r));radioCtl.play()}});
+/* browsers block sound until the visitor interacts: the first click, tap or key press anywhere starts the radio */
+const startRadio=()=>{if(radioCtl)radioCtl.play()};
+["pointerdown","keydown"].forEach(t=>addEventListener(t,startRadio,{once:true}));
+addEventListener("pointerdown",e=>{if(listOpen&&!e.target.closest("#radio"))openList(false)});
+label();makeRadio();
+buildLists();measure();
+if(gl){initScene();if(!reduced)gsap.delayedCall(2,step)}
+route_();requestAnimationFrame(frame);
+</script></body></html>
